@@ -1,1 +1,213 @@
+1 Version.h incremented
+
+//! Switch algo Qubit to Yescrypt starts with this version
+static const int QUBIT_TO_YESCRYPT_VERSION = 70004;
+
+2 rpcmisc.cpp add 
+    obj.push_back(Pair("difficulty_yescrypt",(double)GetDifficulty(NULL, ALGO_YESCRYPT)));
+    
+3 RPC Mining.cpp add
+    obj.push_back(Pair("difficulty_yescrypt",(double)GetDifficulty(NULL, ALGO_YESCRYPT)));
+
+*4 configure.ac add check lib if mingw (probably not needed
+
+5 rpcblockchain.cpp add
+Object AlgoSwitch1ForkDesc(const std::string &name, int version, CBlockIndex* pindex, const Consensus::Params& consensusParams)
+{
+    Object rv;
+    rv.push_back(Pair("id", name));
+    rv.push_back(Pair("version", version));
+    Object bh;
+    int nHeight = (int)chainActive.Height();
+    bh.push_back(Pair("status", nHeight >= consensusParams.nFork1MinBlock));
+    bh.push_back(Pair("height", nHeight));
+    bh.push_back(Pair("height-active", consensusParams.nFork1MinBlock));
+    rv.push_back(Pair("enforce-condition-blockheight", bh));
+    rv.push_back(Pair("enforce-condition-majority", SoftForkMajorityDesc(version, pindex, consensusParams.nMajorityEnableAlgoSwitch1, consensusParams)));
+    return rv;
+}
+
+AND
+
+    obj.push_back(Pair("difficulty_yescrypt",   (double)GetDifficulty(NULL, ALGO_YESCRYPT)));
+
+AND
+
+    softforks.push_back(AlgoSwitch1ForkDesc("algoswitch1", 4, tip, consensusParams));
+
+6 pow.cpp
+
+NUM_ALGOS -> NUM ALGOS_IMPL
+
+7 miner.cpp add
+
+            case ALGO_YESCRYPT:
+                LogPrintf("MyriadMiner[Yescrypt] miner started\n");
+                GenericMiner(pwallet, ALGO_YESCRYPT); // could be replaced with a decent yescrypt miner in the style of scrypt, but how much need?
+                break;
+
+8 makefile.am
+
+  crypto/yescrypt.h \
+  crypto/sysendian.h \
+  crypto/yescryptcommon.c \
+  crypto/yescrypt-best.c \
+  crypto/yescrypt-platform.c \
+  crypto/sha256_Y.h \
+  crypto/sha256_Y.c 
+  
+
+9 main.cpp
+
+    // Check for algo switch 1
+    // Active when:
+    //   previous YESCRYPT block was mined or;
+    //   mining majority and fork height reached
+    bool bAlgoSwitch1 = false;
+    if (nHeight >= consensusParams.nFork1MinBlock)
+    {
+        bAlgoSwitch1 = IsAlgoSwitch1Active(pindexPrev, consensusParams);
+        if (!bAlgoSwitch1)
+            bAlgoSwitch1 =
+                    (block.nVersion > 3) &&
+                    IsSuperMajority(4, pindexPrev, consensusParams.nMajorityEnableAlgoSwitch1, consensusParams);
+    }
+    if (bAlgoSwitch1)
+    {
+        if (algo == ALGO_QUBIT)
+            return state.Invalid(error("%s: invalid QUBIT block", __func__),
+                                 REJECT_INVALID, "invalid-algo");
+    }
+    else
+    {
+        if (algo == ALGO_YESCRYPT)
+            return state.Invalid(error("%s: invalid YESCRYPT block", __func__),
+                                 REJECT_INVALID, "invalid-algo");
+    }
+
+AND
+
+            // Maximum sequence count allowed
+            int nMaxSeqCount;
+            if ( (nHeight > chainparams.GetConsensus().nFork1MinBlock) &&
+                 (block.nVersion > 3) &&
+                 IsSuperMajority(4, pindexPrev, chainparams.GetConsensus().nMajorityEnableAlgoSwitch1, chainparams.GetConsensus()) )
+                nMaxSeqCount = chainparams.GetConsensus().nBlockSequentialAlgoMaxCount3;
+            else
+                if (nHeight > chainparams.GetConsensus().nBlockSequentialAlgoRuleStart2)
+                    nMaxSeqCount = chainparams.GetConsensus().nBlockSequentialAlgoMaxCount2;
+                    else
+                        nMaxSeqCount = chainparams.GetConsensus().nBlockSequentialAlgoMaxCount1;
+
+            while (piPrev!=NULL && (nAlgoCount <= nMaxSeqCount))
+
+AND
+
+static bool IsAlgoSwitch1Active(const CBlockIndex* pstart, const Consensus::Params& consensusParams)
+{
+    bool algoFound = false;
+    for (int i = 0; i < consensusParams.nAlgoSwitch1EnableWindow && !algoFound && pstart != NULL; i++)
+    {
+        if (pstart->GetAlgo() == ALGO_YESCRYPT)
+            algoFound = true;
+        pstart = pstart->pprev;
+    }
+    return (algoFound);
+}
+
+10 init.cpp change
+
+    strUsage += HelpMessageOpt("-algo=<algo>", _("Mining algorithm: sha256d, scrypt, groestl, skein, qubit, yescrypt"));
+
+AND
+
+    else if (strAlgo == "yescrypt")
+        miningAlgo = ALGO_YESCRYPT;
+
+11 clientversion.h change
+#define CLIENT_VERSION_REVISION 3
+
+12 chainparams.cpp
+
+        consensus.nFork1MinBlock = 1764000; // minimum block height where fork 1 takes effect (algo switch, seq algo count change)
+        consensus.nMajorityEnableAlgoSwitch1 = 750;
+        consensus.nAlgoSwitch1EnableWindow = 2000;
+
+AND
+
+        consensus.nBlockSequentialAlgoMaxCount3 = 6; // maximum sequential blocks of same algo
+
+AND
+
+        consensus.nFork1MinBlock = 300;
+        consensus.nMajorityEnableAlgoSwitch1 = 60;
+        consensus.nAlgoSwitch1EnableWindow = 200;
+
+13 pureheader.h
+
+    ALGO_SHA256D = 0, 
+    ALGO_SCRYPT  = 1, 
+    ALGO_GROESTL = 2,
+    ALGO_SKEIN   = 3,
+    ALGO_QUBIT   = 4,
+    NUM_ALGOS };
+
+TO
+
+    ALGO_SHA256D  = 0,
+    ALGO_SCRYPT   = 1,
+    ALGO_GROESTL  = 2,
+    ALGO_SKEIN    = 3,
+    ALGO_QUBIT    = 4,
+    ALGO_YESCRYPT = 5,
+    NUM_ALGOS_IMPL };
+
+const int NUM_ALGOS = 5;
+
+AND (MAYBE?)
+
+    BLOCK_VERSION_DEFAULT        = 4, // change this in later release for BIP66 (3) and BIP65 (4) softforks 
+
+AND
+
+    BLOCK_VERSION_YESCRYPT       = (5 << 9),
+
+AND
+
+                break;
+            case ALGO_YESCRYPT:
+                nVersion |= BLOCK_VERSION_YESCRYPT;
+
+13 pureheader.cpp
+
+#include "crypto/yescrypt.h"
+
+AND
+
+        case ALGO_YESCRYPT:
+        {
+            uint256 thash;
+            yescrypt_hash(BEGIN(nVersion), BEGIN(thash));
+            return thash;
+        }
+
+AND
+
+        case BLOCK_VERSION_YESCRYPT:
+            return ALGO_YESCRYPT;
+
+AND
+
+        case ALGO_YESCRYPT:
+            return std::string("yescrypt");
+
+14 params.h
+
+    int nBlockSequentialAlgoMaxCount3;
+
+AND
+
+    int64_t nFork1MinBlock;
+    int nMajorityEnableAlgoSwitch1;
+    int nAlgoSwitch1EnableWindow;
 
